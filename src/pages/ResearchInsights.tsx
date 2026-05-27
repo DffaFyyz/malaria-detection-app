@@ -3,6 +3,9 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
+  Legend,
+  Line,
+  LineChart,
   Pie,
   PieChart,
   ResponsiveContainer,
@@ -10,34 +13,152 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { Activity, BarChart3, Database, FlaskConical, Microscope } from "lucide-react";
+import { Activity, AlertCircle, BarChart3, Database, FlaskConical, Microscope } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { PageHeader } from "../components/PageHeader";
 import { Panel } from "../components/Panel";
 import { ResearchDisclaimer } from "../components/ResearchDisclaimer";
 import { StatCard } from "../components/StatCard";
-import { edaSummary } from "../data/edaSummary";
+import { fetchModelMetadata } from "../lib/api";
 import { formatNumber, formatPercent } from "../lib/format";
+import type { ModelMetadata } from "../types/metadata";
 
-const modelChartData = edaSummary.modelComparison.map((model) => ({
-  name: model.model,
-  accuracy: Number((model.accuracy * 100).toFixed(2)),
-  f1: Number((model.f1Parasitized * 100).toFixed(2)),
-  rocAuc: Number((model.rocAuc * 100).toFixed(2)),
-}));
-
-const classDistributionData = edaSummary.classDistribution.map((item) => ({ ...item }));
-
-const importanceChartData = edaSummary.featureImportance.map((item) => ({
-  feature: item.feature,
-  importance: Number((item.importance * 100).toFixed(2)),
-}));
-
-const coefficientChartData = edaSummary.logisticCoefficients.map((item) => ({
-  feature: item.feature,
-  coefficient: Number(item.coefficient.toFixed(4)),
-}));
+function toPercentValue(value: number) {
+  return Number((value * 100).toFixed(2));
+}
 
 export function ResearchInsights() {
+  const [metadata, setMetadata] = useState<ModelMetadata | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    fetchModelMetadata()
+      .then((nextMetadata) => {
+        if (!isMounted) return;
+        setMetadata(nextMetadata);
+        setError(null);
+      })
+      .catch((caughtError) => {
+        if (!isMounted) return;
+        setError(
+          caughtError instanceof Error
+            ? caughtError.message
+            : "Unable to load model metadata.",
+        );
+      })
+      .finally(() => {
+        if (!isMounted) return;
+        setIsLoading(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const modelChartData = useMemo(
+    () =>
+      metadata?.modelComparison.map((model) => ({
+        name: model.model,
+        accuracy: toPercentValue(model.accuracy),
+        f1: toPercentValue(model.f1Parasitized),
+        rocAuc: toPercentValue(model.rocAuc),
+      })) ?? [],
+    [metadata],
+  );
+
+  const classDistributionData = metadata?.classDistribution.map((item) => ({ ...item })) ?? [];
+
+  const importanceChartData =
+    metadata?.featureImportance.map((item) => ({
+      feature: item.feature,
+      importance: toPercentValue(item.importance),
+    })) ?? [];
+
+  const coefficientChartData =
+    metadata?.logisticCoefficients.map((item) => ({
+      feature: item.feature,
+      coefficient: Number(item.coefficient.toFixed(4)),
+    })) ?? [];
+
+  const learningCurveData = useMemo(() => {
+    const rowsBySize = new Map<
+      number,
+      {
+        trainingExamples: number;
+        randomForestTrain?: number;
+        randomForestValidation?: number;
+        logisticRegressionTrain?: number;
+        logisticRegressionValidation?: number;
+      }
+    >();
+
+    for (const point of metadata?.learningCurve.points ?? []) {
+      const row = rowsBySize.get(point.trainingExamples) ?? {
+        trainingExamples: point.trainingExamples,
+      };
+      const isRandomForest = point.model === "Random Forest";
+
+      if (isRandomForest) {
+        row.randomForestTrain = toPercentValue(point.trainF1Mean);
+        row.randomForestValidation = toPercentValue(point.validationF1Mean);
+      } else {
+        row.logisticRegressionTrain = toPercentValue(point.trainF1Mean);
+        row.logisticRegressionValidation = toPercentValue(point.validationF1Mean);
+      }
+
+      rowsBySize.set(point.trainingExamples, row);
+    }
+
+    return Array.from(rowsBySize.values()).sort(
+      (left, right) => left.trainingExamples - right.trainingExamples,
+    );
+  }, [metadata]);
+
+  if (isLoading) {
+    return (
+      <div>
+        <PageHeader
+          eyebrow="Research insights"
+          title="Dataset, Features, and Model Evaluation"
+          description="Loading model metadata from the Flask API."
+        />
+        <Panel className="p-6">
+          <p className="text-sm font-semibold text-clinical-ink">Loading metadata...</p>
+          <p className="mt-2 text-sm leading-6 text-clinical-muted">
+            Requesting metadata from the Flask service.
+          </p>
+        </Panel>
+      </div>
+    );
+  }
+
+  if (error || !metadata) {
+    return (
+      <div>
+        <PageHeader
+          eyebrow="Research insights"
+          title="Dataset, Features, and Model Evaluation"
+          description="Unable to load model metadata from the Flask API."
+        />
+        <Panel className="border-red-200 bg-red-50 p-6 text-red-900">
+          <div className="flex gap-3">
+            <AlertCircle className="mt-0.5 h-5 w-5 flex-none" aria-hidden="true" />
+            <div>
+              <p className="font-semibold">Metadata request failed</p>
+              <p className="mt-2 text-sm leading-6">
+                {error ?? "The metadata response was empty."}
+              </p>
+            </div>
+          </div>
+        </Panel>
+      </div>
+    );
+  }
+
   return (
     <div>
       <PageHeader
@@ -50,25 +171,29 @@ export function ResearchInsights() {
         <StatCard
           icon={<Database className="h-6 w-6" aria-hidden="true" />}
           label="Total Samples"
-          value={formatNumber(edaSummary.dataset.totalSamples)}
+          value={formatNumber(metadata.dataset.totalSamples)}
           helper="Thin blood smear cell images"
         />
         <StatCard
           icon={<Microscope className="h-6 w-6" aria-hidden="true" />}
           label="Uninfected"
-          value={formatNumber(edaSummary.dataset.uninfected)}
-          helper="Class share: 50%"
+          value={formatNumber(metadata.dataset.uninfected)}
+          helper={`Class share: ${formatPercent(
+            metadata.dataset.uninfected / metadata.dataset.totalSamples,
+          )}`}
         />
         <StatCard
           icon={<Activity className="h-6 w-6" aria-hidden="true" />}
           label="Parasitized"
-          value={formatNumber(edaSummary.dataset.parasitized)}
-          helper="Class share: 50%"
+          value={formatNumber(metadata.dataset.parasitized)}
+          helper={`Class share: ${formatPercent(
+            metadata.dataset.parasitized / metadata.dataset.totalSamples,
+          )}`}
         />
         <StatCard
           icon={<BarChart3 className="h-6 w-6" aria-hidden="true" />}
           label="Data Quality Flags"
-          value={`${edaSummary.dataset.missingValues} / ${edaSummary.dataset.duplicateRows}`}
+          value={`${metadata.dataset.missingValues} / ${metadata.dataset.duplicateRows}`}
           helper="Missing values / duplicate rows"
         />
       </div>
@@ -85,7 +210,7 @@ export function ResearchInsights() {
           <div className="mt-5 rounded-lg border border-teal-200 bg-teal-50 p-4 text-sm leading-6 text-teal-900">
             <div className="flex gap-3">
               <FlaskConical className="mt-0.5 h-5 w-5 flex-none" aria-hidden="true" />
-              <p>{edaSummary.modelSupport.note}</p>
+              <p>{metadata.modelSupport.note}</p>
             </div>
           </div>
         </Panel>
@@ -103,7 +228,7 @@ export function ResearchInsights() {
                   outerRadius={96}
                   paddingAngle={2}
                 >
-                  {edaSummary.classDistribution.map((entry) => (
+                  {metadata.classDistribution.map((entry) => (
                     <Cell key={entry.name} fill={entry.fill} />
                   ))}
                 </Pie>
@@ -112,7 +237,7 @@ export function ResearchInsights() {
             </ResponsiveContainer>
           </div>
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            {edaSummary.classDistribution.map((item) => (
+            {metadata.classDistribution.map((item) => (
               <div key={item.name} className="rounded-lg border border-clinical-line bg-slate-50 p-3">
                 <div className="flex items-center gap-2">
                   <span className="h-3 w-3 rounded-full" style={{ backgroundColor: item.fill }} />
@@ -128,7 +253,7 @@ export function ResearchInsights() {
       <Panel className="mt-8 p-6">
         <h2 className="text-lg font-semibold">Feature Explanations</h2>
         <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {edaSummary.featureExplanations.map((feature) => (
+          {metadata.featureExplanations.map((feature) => (
             <div key={feature.key} className="rounded-lg border border-clinical-line bg-slate-50 p-4">
               <p className="text-base font-semibold">{feature.name}</p>
               <p className="mt-2 text-sm leading-6 text-clinical-muted">{feature.description}</p>
@@ -141,7 +266,7 @@ export function ResearchInsights() {
         <Panel className="p-6">
           <h2 className="text-lg font-semibold">Model Workflow</h2>
           <ol className="mt-5 space-y-4">
-            {edaSummary.workflow.map((step, index) => (
+            {metadata.workflow.map((step, index) => (
               <li key={step} className="flex gap-4">
                 <span className="flex h-8 w-8 flex-none items-center justify-center rounded-full bg-blue-50 text-sm font-semibold text-clinical-blue">
                   {index + 1}
@@ -217,7 +342,7 @@ export function ResearchInsights() {
               </tr>
             </thead>
             <tbody className="divide-y divide-clinical-line bg-white">
-              {edaSummary.modelComparison.map((model) => (
+              {metadata.modelComparison.map((model) => (
                 <tr key={model.model}>
                   <td className="px-6 py-4 font-medium text-clinical-ink">{model.model}</td>
                   <td className="px-6 py-4">{formatPercent(model.accuracy)}</td>
@@ -268,15 +393,55 @@ export function ResearchInsights() {
             </p>
           </div>
           <span className="inline-flex w-fit rounded-full border border-clinical-line bg-slate-50 px-3 py-1 text-xs font-semibold text-clinical-muted">
-            F1 score
+            {metadata.learningCurve.scoring} score / {metadata.learningCurve.cv}-fold CV
           </span>
         </div>
-        <div className="mt-5 overflow-hidden rounded-lg border border-clinical-line bg-white">
-          <img
-            alt="Learning curve comparing Random Forest and Logistic Regression training and validation F1 scores"
-            className="w-full object-contain"
-            src="/research/learning_curve.png"
-          />
+        <div className="mt-5 h-96 rounded-lg border border-clinical-line bg-white p-4">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={learningCurveData} margin={{ left: 8, right: 20, top: 10 }}>
+              <CartesianGrid stroke="#E2E8F0" strokeDasharray="4 4" />
+              <XAxis
+                dataKey="trainingExamples"
+                tickFormatter={(value: number) => formatNumber(value)}
+              />
+              <YAxis domain={[90, 101]} tickFormatter={(value: number) => `${value}%`} />
+              <Tooltip
+                formatter={(value: number) => `${value.toFixed(2)}%`}
+                labelFormatter={(value: number) => `${formatNumber(value)} training examples`}
+              />
+              <Legend />
+              <Line
+                dataKey="randomForestTrain"
+                name="RF Train F1"
+                stroke="#2563EB"
+                strokeDasharray="6 4"
+                strokeWidth={2}
+                type="monotone"
+              />
+              <Line
+                dataKey="randomForestValidation"
+                name="RF Validation F1"
+                stroke="#2563EB"
+                strokeWidth={2}
+                type="monotone"
+              />
+              <Line
+                dataKey="logisticRegressionTrain"
+                name="LR Train F1"
+                stroke="#0F766E"
+                strokeDasharray="6 4"
+                strokeWidth={2}
+                type="monotone"
+              />
+              <Line
+                dataKey="logisticRegressionValidation"
+                name="LR Validation F1"
+                stroke="#0F766E"
+                strokeWidth={2}
+                type="monotone"
+              />
+            </LineChart>
+          </ResponsiveContainer>
         </div>
       </Panel>
 
