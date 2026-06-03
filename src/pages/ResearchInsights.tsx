@@ -251,6 +251,50 @@ export function ResearchInsights() {
       </div>
 
       <Panel className="mt-8 p-6">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <h2 className="text-lg font-semibold">Why Malaria Cell Classification Matters</h2>
+          <span className="inline-flex w-fit flex-none rounded-full border border-teal-200 bg-teal-50 px-3 py-1 text-xs font-semibold text-teal-900">
+            For academic research and educational use only
+          </span>
+        </div>
+
+        <div className="mt-5 grid gap-5 text-sm leading-7 text-clinical-muted lg:grid-cols-2">
+          <p>
+            Malaria remains one of the major global health problems, especially in tropical and
+            low-resource regions. According to the World Health Organization, there were an
+            estimated 282 million malaria cases and 610,000 malaria deaths worldwide in 2024. Most
+            of this burden occurred in the WHO African Region, which accounted for about 95% of
+            global malaria cases and deaths. Children under five years old are among the most
+            vulnerable groups affected by the disease.
+          </p>
+          <p>
+            Early and accurate diagnosis is important because malaria can progress from mild
+            symptoms into severe illness if it is not treated properly. Laboratory confirmation is
+            still required for malaria diagnosis, and microscopic examination of stained blood
+            smears remains a gold standard method for identifying malaria parasites. However, this
+            process depends on the quality of the microscope, blood smear preparation, staining, and
+            the experience of the laboratory personnel.
+          </p>
+          <p>
+            This project explores how image processing and machine learning can support malaria
+            cell classification by analyzing thin blood smear cell images. Instead of relying only
+            on manual observation, the system extracts measurable visual features from each cell
+            image, such as cell area, parasite-like region count, parasite area, and texture
+            contrast. These features are then used by classical machine learning models to classify
+            whether a cell is Parasitized or Uninfected.
+          </p>
+          <p>
+            The goal of this application is not to replace medical diagnosis, but to demonstrate how
+            computational methods can assist image-based disease analysis. By converting microscopic
+            cell images into structured numerical features, the system helps make the
+            classification process more consistent, explainable, and easier to evaluate. This makes
+            the project useful for academic research, model comparison, and understanding how visual
+            patterns in infected blood cells can be translated into machine-learning features.
+          </p>
+        </div>
+      </Panel>
+
+      <Panel className="mt-8 p-6">
         <h2 className="text-lg font-semibold">Feature Explanations</h2>
         <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           {metadata.featureExplanations.map((feature) => (
